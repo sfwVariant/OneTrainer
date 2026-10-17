@@ -39,7 +39,8 @@ class Krea2FineTuneSetup(
     ):
         self._setup_model_part_requires_grad("transformer", model.transformer, config.transformer, model.train_progress)
         model.vae.requires_grad_(False)
-        model.text_encoder.requires_grad_(False)
+        if model.text_encoder is not None:
+            model.text_encoder.requires_grad_(False)
 
 
     def setup_model(
