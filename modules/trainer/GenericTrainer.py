@@ -54,6 +54,7 @@ _PROFILE_STEPS = (10, 11, 40, 41) if _DEBUG_PROFILES else ()
 def should_unload_text_encoder(config: TrainConfig) -> bool:
     return (
         config.unload_text_encoder_after_caching
+        and not config.only_cache
         and config.latent_caching
         and not any(
             getattr(config, part).train
