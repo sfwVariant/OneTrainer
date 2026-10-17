@@ -6,9 +6,15 @@ import modules.util.nvcomp_util as nvcomp_util
 from modules.module.quantized.mixin.CompressedWeightMixin import CompressedWeightMixin
 from modules.module.quantized.mixin.QuantizedLinearMixin import QuantizedLinearMixin
 from modules.module.quantized.mixin.QuantizedModuleMixin import QuantizedModuleMixin
-from modules.util.config.TrainConfig import QuantizationConfig, TrainConfig
+from modules.util.config.TrainConfig import QuantizationConfig, TrainConfig, TrainModelPartConfig
 from modules.util.enum.DataType import DataType
 from modules.util.ModuleFilter import ModuleFilter
+from modules.util.quantization_cache import (
+    build_cache_info,
+    has_cacheable_modules,
+    save_quantization_cache,
+    try_load_quantization_cache,
+)
 
 import torch
 from torch import Tensor, nn
@@ -262,10 +268,28 @@ def is_quantized_parameter(
     return False
 
 
-def quantize_layers(module: nn.Module, device: torch.device, train_dtype: DataType, config: TrainConfig, compress: bool = False):
+def quantize_layers(module: nn.Module, device: torch.device, train_dtype: DataType, config: TrainConfig, compress: bool = False, cache_component: str | None = None, config_part: TrainModelPartConfig | None = None):
     if module is None:
         return
     child_modules = list(module.modules())
+
+    #quantized weight cache: restore the component's cached quantized state (skipping the
+    #re-quantization), or persist it after quantizing. Only enabled for cacheable, non-compressed,
+    #non-SVD quantization with an available component identity - every other path quantizes
+    #exactly as before.
+    cache_info = None
+    cache_supported = False
+    if cache_component is not None and config_part is not None \
+            and not compress \
+            and config.quantization.svd_dtype == DataType.NONE:
+        cache_info = build_cache_info(config, cache_component, config_part)
+        if cache_info is not None:
+            cache_supported = has_cacheable_modules(module)
+
+    if cache_supported and try_load_quantization_cache(module, cache_info, train_dtype):
+        if multi.is_master():
+            print(f"Loaded quantized weights from cache ({cache_info.readable_name})")
+        return
 
     compressible = [m for m in child_modules if isinstance(m, CompressedWeightMixin)]
     if compress and not nvcomp_util.available():
@@ -285,6 +309,10 @@ def quantize_layers(module: nn.Module, device: torch.device, train_dtype: DataTy
         compressed = sum(m.weight.nbytes for m in compressible)
         if uncompressed > 0:
             tqdm.write(f"nvCOMP weight compression ({type(module).__name__}): {uncompressed / 2**20:.0f} -> {compressed / 2**20:.0f} MiB ({(1 - compressed / uncompressed) * 100:.0f}% saved)")
+
+    if cache_supported and multi.is_master():
+        save_quantization_cache(module, cache_info)
+        print(f"Saved quantized weights to cache ({cache_info.readable_name})")
 
 def get_unquantized_weight(module: nn.Linear, dtype: torch.dtype, device: torch.device) -> Tensor:
     assert isinstance(module, nn.Linear)

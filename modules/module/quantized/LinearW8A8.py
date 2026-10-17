@@ -130,6 +130,14 @@ class LinearW8A8(
         if self.compress:
             self._compress_weight(device=device)
 
+    @torch.no_grad()
+    def finalize_cached_quantization(self):
+        #restored from the quantization cache: the weight/scale already hold the quantized
+        #tensors, so just mark the layer as quantized and frozen, like quantize() does. Must
+        #live in this class so __is_quantized name-mangles to _LinearW8A8__is_quantized.
+        self.requires_grad_(False)
+        self.__is_quantized = True
+
     def forward(self, x_orig: torch.Tensor) -> torch.Tensor:
         assert not self.weight.requires_grad
         assert self.__is_quantized

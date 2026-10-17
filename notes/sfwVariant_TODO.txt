@@ -1,0 +1,3 @@
+Try turning EMA on (middle training settings column)
+
+Try training at constant learning rate until get overall likeness, then further training at linear or cosine which both reduce the learning rate over time (cosine = maintains high for longer, linear = straight line down to zero)

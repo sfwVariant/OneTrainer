@@ -50,6 +50,12 @@ class LinearFp8(
                 weight = weight.to(device=orig_device)
         self.weight.data = weight
 
+    def finalize_cached_quantization(self):
+        #restored from the quantization cache: the weight/scale already hold the quantized
+        #tensors, so just mark the layer as quantized and frozen, like quantize() does.
+        self.is_quantized = True
+        self.requires_grad_(False)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         weight = self.weight.detach()
         weight = weight.to(dtype=self.compute_dtype if self.compute_dtype is not None else x.dtype)

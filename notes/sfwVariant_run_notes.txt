@@ -1,0 +1,5 @@
+v7 run: llm and cutdown sets, 20 each of cutdown 10 each of llm (both split evenly by headphones), 10% full tag dropout rate, Anby Demara capitalised, 0.0002 learning rate, batch size 2, rank 24
+
+- 60 total images per epoch (30 steps)
+
+https://www.reddit.com/r/StableDiffusion/comments/1uh95sz/training_krea_2_lora_on_rtx3060_12gb_a_slow/

@@ -1,0 +1,15 @@
+You checked what "Crop Jitter" does in concept settings:
+  - When asect ratio bucketing happens, crop jitter makes the crops somewhat random instead of being fixed to centre-crop
+  - BUT, if latent caching is on ("data" tab, yes it's usually on) then this only happens once, so every image just gets a single random crop
+  - So... probably turn that off, for consistency between runs
+
+
+
+GRADIENT ACCUMULATION & BATCH SIZE
+
+from here: https://www.reddit.com/r/StableDiffusion/comments/1uh95sz/training_krea_2_lora_on_rtx3060_12gb_a_slow/
+
+- Both good & very similar
+- accumulation does 1 image/batch a time but averages the result over x steps, so this is like a vram-friendly way to increase batch size
+- in any case, both result in less instability on an image-by-image basis, reducing chances of individual images causing issues in training
+- suggests higher for non-character stuff like style loras, like 4 or even 8
