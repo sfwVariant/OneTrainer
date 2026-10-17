@@ -16,7 +16,7 @@ from modules.util.enum.VideoFormat import VideoFormat
 
 import torch
 
-from diffusers import Krea2Pipeline
+from diffusers import Krea2Pipeline, VaeImageProcessor
 
 from tqdm import tqdm
 
@@ -34,7 +34,11 @@ class Krea2Sampler(BaseModelSampler):
 
         self.model = model
         self.model_type = model_type
-        self.pipeline = model.create_pipeline()
+        # Do not construct a pipeline here: it would retain an independent text-encoder
+        # reference after the model releases its copy following caching.
+        vae_scale_factor = 2 ** len(model.vae.temperal_downsample) \
+            if getattr(model, "vae", None) else 8
+        self.image_processor = VaeImageProcessor(vae_scale_factor=vae_scale_factor * 2)
 
     @torch.no_grad()
     def __sample_base(
@@ -58,10 +62,10 @@ class Krea2Sampler(BaseModelSampler):
                 generator.manual_seed(seed)
 
             noise_scheduler = copy.deepcopy(self.model.noise_scheduler)
-            image_processor = self.pipeline.image_processor
+            image_processor = self.image_processor
 
-            transformer = self.pipeline.transformer
-            vae = self.pipeline.vae
+            transformer = self.model.transformer
+            vae = self.model.vae
             vae_scale_factor = 8
             num_latent_channels = 16
 

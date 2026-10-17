@@ -1,4 +1,5 @@
 from abc import ABCMeta
+from collections.abc import Callable
 from contextlib import nullcontext
 from uuid import uuid4
 
@@ -96,6 +97,8 @@ class BaseModel(metaclass=ABCMeta):
         self.embedding_state_dicts = {}
         self.autocast_context = nullcontext()
         self.train_dtype = DataType.FLOAT_32
+        self._text_encoder_reload_callback: Callable[[], None] | None = None
+        self._unloaded_text_encoder_parts: set[str] = set()
 
     @property
     def train_device(self) -> torch.device:
@@ -107,6 +110,8 @@ class BaseModel(metaclass=ABCMeta):
 
     def materialize(self, *parts: str):
         # Move `parts` onto train_device.
+        if any(part in self._unloaded_text_encoder_parts for part in parts):
+            self.ensure_text_encoders_loaded()
         for part in parts:
             self._move_part(part, self.train_device)
 
@@ -131,6 +136,59 @@ class BaseModel(metaclass=ABCMeta):
         # call this before encode_text, which reads every text encoder the model has.
         self.materialize_only(*self.model_type.text_encoder_parts())
 
+    def text_encoder_reference_names(self) -> tuple[str, ...]:
+        """Model attributes that retain text-encoding modules."""
+        return tuple(
+            f"{part}_1" if hasattr(self, f"{part}_1") else part
+            for part in self.model_type.text_encoder_parts()
+        )
+
+    def set_text_encoder_reload_callback(self, callback: Callable[[], None] | None):
+        self._text_encoder_reload_callback = callback
+
+    def ensure_text_encoders_loaded(self):
+        if not self._unloaded_text_encoder_parts:
+            return
+        if self._text_encoder_reload_callback is None:
+            raise RuntimeError("Text encoders were unloaded and no reload callback is configured")
+
+        self._text_encoder_reload_callback()
+        missing = [
+            part for part in self._unloaded_text_encoder_parts
+            if getattr(self, f"{part}_1" if hasattr(self, f"{part}_1") else part, None) is None
+        ]
+        if missing:
+            raise RuntimeError(f"Failed to reload text encoder components: {', '.join(missing)}")
+        self._unloaded_text_encoder_parts.clear()
+
+    def unload_text_encoders(self):
+        """Remove text encoder modules and all model-owned references to them."""
+        unloaded_parts = set()
+        for part in self.model_type.text_encoder_parts():
+            stem = f"{part}_1" if hasattr(self, f"{part}_1") else part
+            component = getattr(self, stem, None)
+            conductor_name = f"{stem}_offload_conductor"
+            conductor = getattr(self, conductor_name, None)
+
+            if conductor is not None:
+                setattr(self, conductor_name, None)
+
+            if component is not None:
+                setattr(self, stem, None)
+                unloaded_parts.add(part)
+
+            # A text-encoder LoRA retains a reference to its wrapped module. This method is only
+            # enabled when text encoders are not trained, so discarding such an adapter is safe.
+            lora_name = f"{stem}_lora"
+            if getattr(self, lora_name, None) is not None:
+                setattr(self, lora_name, None)
+
+            del component
+            del conductor
+
+        self._unloaded_text_encoder_parts.update(unloaded_parts)
+        torch_gc()
+
     def _move_part(self, part: str, device: torch.device):
         # The generic per-component move: `part` (or `part_1` for the first of several split text encoders),
         # its LoRA (`{part}_lora`), and its layer-offload conductor (`{part}_offload_conductor`), if present.
@@ -144,7 +202,7 @@ class BaseModel(metaclass=ABCMeta):
                 assert device_equals(device, self.train_device), f"unexpected device {device} for part {part}"
                 conductor.materialize()
         else:
-            component = getattr(self, stem)  # raises if `part` doesn't name a real attribute
+            component = getattr(self, stem, None)
             # None when the part is excluded from training (e.g. a text encoder with include_text_encoder off):
             # it stays in model_parts() but the loader never populated it, so there is nothing to move.
             if component is not None:
@@ -160,7 +218,7 @@ class BaseModel(metaclass=ABCMeta):
         # (SD's depth_estimator, Anima's text_conditioner) overrides this.
         for part in self.model_type.model_parts():
             stem = f"{part}_1" if hasattr(self, f"{part}_1") else part
-            component = getattr(self, stem)
+            component = getattr(self, stem, None)
             if component is not None:
                 component.eval()
 

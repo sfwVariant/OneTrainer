@@ -34,7 +34,8 @@ class Krea2LoRASetup(
             model: Krea2Model,
             config: TrainConfig,
     ):
-        model.text_encoder.requires_grad_(False)
+        if model.text_encoder is not None:
+            model.text_encoder.requires_grad_(False)
         model.transformer.requires_grad_(False)
         model.vae.requires_grad_(False)
 
@@ -76,7 +77,8 @@ class Krea2LoRASetup(
             parts.append("vae")
         model.materialize_only(*parts)
 
-        model.text_encoder.eval()
+        if model.text_encoder is not None:
+            model.text_encoder.eval()
         model.vae.eval()
 
         if config.transformer.train:

@@ -55,6 +55,18 @@ def make_lora_model_loader(
 
             return model
 
+        def load_text_encoders(
+                self,
+                model: model_class,
+                model_type: ModelType,
+                model_names: ModelNames,
+                weight_dtypes: ModelWeightDtypes,
+                quantization: QuantizationConfig,
+        ):
+            model_loader_class().load_text_encoders(
+                model, model_type, model_names, weight_dtypes, quantization,
+            )
+
     for model_type in model_spec_map:
         factory.register(BaseModelLoader, GenericLoRAModelLoader, model_type, TrainingMethod.LORA)
     return GenericLoRAModelLoader

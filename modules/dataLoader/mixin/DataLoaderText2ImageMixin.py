@@ -55,6 +55,18 @@ from diffusers import AutoencoderKL
 
 
 class DataLoaderText2ImageMixin(metaclass=ABCMeta):
+    def _set_text_encoder_pipeline_references(self, model: BaseModel, unload: bool):
+        for module in self.get_data_set().loading_pipeline.modules:
+            for name in model.text_encoder_reference_names():
+                if hasattr(module, name):
+                    setattr(module, name, None if unload else getattr(model, name, None))
+
+    def unload_text_encoder_references(self, model: BaseModel):
+        self._set_text_encoder_pipeline_references(model, unload=True)
+
+    def restore_text_encoder_references(self, model: BaseModel):
+        self._set_text_encoder_pipeline_references(model, unload=False)
+
     def _enumerate_input_modules(self, config: TrainConfig, allow_videos: bool = False) -> list:
         supported_extensions = set()
         supported_extensions |= path_util.supported_image_extensions()

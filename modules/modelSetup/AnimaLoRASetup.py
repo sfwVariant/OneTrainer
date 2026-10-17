@@ -34,8 +34,10 @@ class AnimaLoRASetup(
             model: AnimaModel,
             config: TrainConfig,
     ):
-        model.text_encoder.requires_grad_(False)
-        model.text_conditioner.requires_grad_(False)
+        if model.text_encoder is not None:
+            model.text_encoder.requires_grad_(False)
+        if model.text_conditioner is not None:
+            model.text_conditioner.requires_grad_(False)
         model.transformer.requires_grad_(False)
         model.vae.requires_grad_(False)
 
@@ -77,8 +79,10 @@ class AnimaLoRASetup(
             parts.append("vae")
         model.materialize_only(*parts)
 
-        model.text_encoder.eval()
-        model.text_conditioner.eval()
+        if model.text_encoder is not None:
+            model.text_encoder.eval()
+        if model.text_conditioner is not None:
+            model.text_conditioner.eval()
 
         model.vae.eval()
 
