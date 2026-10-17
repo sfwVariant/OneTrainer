@@ -178,7 +178,7 @@ Changing the base model, transformer override, quantization dtype, layer filters
 
 Add an option which allows the text encoder to be unloaded from memory during training.
 
-* Add a new checkbox option in the `General` tab: `Unload text encoder after caching`
+* Add a new checkbox option in the `General` tab (and associated json config setting): `Unload text encoder after caching`
     * Positioned after the `Temp Device` option
 * When set to true, this causes the text encoder to be fully unloaded from VRAM/RAM once the initial caching step is completed (`Latent Caching` enabled) in order to free memory
     * Similarly, the text encoder should also be unloaded if the cache is being re-used due to `Clear cache before training` being disabled
