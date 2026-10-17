@@ -8,6 +8,7 @@ from modules.util.convert_util import add_prefix
 from modules.util.enum.DataType import DataType
 from modules.util.enum.ModelType import ModelType
 from modules.util.LayerOffloadConductor import LayerOffloadConductor
+from modules.util.torch_util import torch_gc
 
 import torch
 from torch import Tensor
@@ -128,19 +129,28 @@ class AnimaModel(BaseModel):
     def materialize(self, *parts: str):
         super().materialize(*parts)
         # text_conditioner isn't in ModelType.model_parts(); it always travels with text_encoder.
-        if "text_encoder" in parts:
+        if "text_encoder" in parts and self.text_conditioner is not None:
             self.text_conditioner.to(device=self.train_device)
 
     def evict(self, *parts: str):
         super().evict(*parts)
         # evict() with no parts means "evict all", which includes text_encoder.
-        if not parts or "text_encoder" in parts:
+        if (not parts or "text_encoder" in parts) and self.text_conditioner is not None:
             self.text_conditioner.to(device=self.temp_device)
 
     def eval(self):
         super().eval()
         # text_conditioner isn't in ModelType.model_parts(); it always travels with text_encoder.
-        self.text_conditioner.eval()
+        if self.text_conditioner is not None:
+            self.text_conditioner.eval()
+
+    def text_encoder_reference_names(self) -> tuple[str, ...]:
+        return (*super().text_encoder_reference_names(), "text_conditioner")
+
+    def unload_text_encoders(self):
+        super().unload_text_encoders()
+        self.text_conditioner = None
+        torch_gc()
 
     def create_pipeline(self):
         pipe = AnimaAutoBlocks().init_pipeline()

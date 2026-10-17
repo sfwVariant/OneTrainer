@@ -27,6 +27,7 @@ from modules.util.enum.ConceptType import ConceptType
 from modules.util.enum.EMAMode import EMAMode
 from modules.util.enum.FileType import FileType
 from modules.util.enum.ModelFormat import ModelFormat
+from modules.util.enum.ModelType import ModelType
 from modules.util.enum.TimeUnit import TimeUnit
 from modules.util.enum.TrainingMethod import TrainingMethod
 from modules.util.profiling_util import PeakMemoryRecorder, TorchMemoryRecorder, TorchProfiler
@@ -48,6 +49,19 @@ from tqdm import tqdm
 _DEBUG_PROFILES = os.environ.get("OT_DEBUG_PROFILES") == "1"
 _MEMORY_PROFILE_STEPS = (0, 1) if _DEBUG_PROFILES else ()
 _PROFILE_STEPS = (10, 11, 40, 41) if _DEBUG_PROFILES else ()
+
+
+def should_unload_text_encoder(config: TrainConfig) -> bool:
+    return (
+        config.unload_text_encoder_after_caching
+        and config.latent_caching
+        and not any(
+            getattr(config, part).train
+            for part in config.model_type.text_encoder_parts()
+        )
+        and not config.train_any_embedding()
+        and not config.train_any_output_embedding()
+    )
 
 
 class GenericTrainer(BaseTrainer):
@@ -84,6 +98,7 @@ class GenericTrainer(BaseTrainer):
         self.model = None
         self.one_step_trained = False
         self.grad_hook_handles = []
+        self.validation_cache_ready = False
 
     def start(self):
         if multi.is_master():
@@ -132,10 +147,12 @@ class GenericTrainer(BaseTrainer):
             self.config.quantization.cache_dir = self.config.cache_dir + "/quantization"
         os.makedirs(self.config.quantization.cache_dir, exist_ok=True)
 
+        self.model_names = model_names
+        self.model_weight_dtypes = self.config.weight_dtypes()
         self.model = self.model_loader.load(
             model_type=self.config.model_type,
-            model_names=model_names,
-            weight_dtypes=self.config.weight_dtypes(),
+            model_names=self.model_names,
+            weight_dtypes=self.model_weight_dtypes,
             quantization=self.config.quantization,
         )
         self.model.train_config = self.config
@@ -146,6 +163,9 @@ class GenericTrainer(BaseTrainer):
         self.model_setup.setup_train_device(self.model, self.config)
         self.model_setup.setup_model(self.model, self.config)
         self.model.eval()
+
+        if self.__should_unload_text_encoder():
+            self.model.set_text_encoder_reload_callback(self.__reload_text_encoders)
 
         self.callbacks.on_update_status("creating the data loader/caching")
 
@@ -182,6 +202,47 @@ class GenericTrainer(BaseTrainer):
                 path = os.path.join(self.config.cache_dir, filename)
                 if os.path.isdir(path) and (filename.startswith('epoch-') or filename in ['image', 'text']):
                     shutil.rmtree(path)
+
+    def __should_unload_text_encoder(self) -> bool:
+        return self.config.model_type in (ModelType.KREA_2, ModelType.ANIMA) \
+            and should_unload_text_encoder(self.config)
+
+    def __reload_text_encoders(self):
+        self.callbacks.on_update_status("Reloading text encoder")
+        self.model_loader.load_text_encoders(
+            self.model,
+            self.config.model_type,
+            self.model_names,
+            self.model_weight_dtypes,
+            self.config.quantization,
+        )
+        self.model_setup.setup_text_encoder_optimizations(self.model, self.config)
+
+        for name in self.model.text_encoder_reference_names():
+            component = getattr(self.model, name, None)
+            if component is not None:
+                component.requires_grad_(False)
+                component.eval()
+
+        for data_loader_name in ("data_loader", "validation_data_loader"):
+            data_loader = getattr(self, data_loader_name, None)
+            if data_loader is not None:
+                data_loader.restore_text_encoder_references(self.model)
+
+    def __unload_text_encoders(self):
+        if not self.__should_unload_text_encoder():
+            return
+
+        for data_loader_name in ("data_loader", "validation_data_loader"):
+            data_loader = getattr(self, data_loader_name, None)
+            if data_loader is not None:
+                data_loader.unload_text_encoder_references(self.model)
+        self.model.unload_text_encoders()
+
+    def __ensure_text_encoders_for_save(self):
+        # Transformer-only LoRA outputs and backups never serialize base text encoders.
+        if self.config.training_method != TrainingMethod.LORA:
+            self.model.ensure_text_encoders_loaded()
 
     def __prune_backups(self, backups_to_keep: int):
         backup_dirpath = os.path.join(self.config.workspace_dir, "backup")
@@ -338,6 +399,7 @@ class GenericTrainer(BaseTrainer):
             )
 
         self.model_setup.setup_train_device(self.model, self.config)
+        self.__unload_text_encoders()
         # Special case for schedule-free optimizers.
         if self.config.optimizer.optimizer.is_schedule_free:
             torch.clear_autocast_cache()
@@ -347,7 +409,11 @@ class GenericTrainer(BaseTrainer):
 
     def __validate(self, train_progress: TrainProgress):
         if self.__needs_validate(train_progress):
-            self.validation_data_loader.get_data_set().start_next_epoch()
+            if self.validation_cache_ready:
+                self.validation_cache_ready = False
+            else:
+                self.validation_data_loader.get_data_set().start_next_epoch()
+            self.__unload_text_encoders()
             current_epoch_length_validation = self.validation_data_loader.get_data_set().approximate_length()
 
             if current_epoch_length_validation == 0:
@@ -449,6 +515,7 @@ class GenericTrainer(BaseTrainer):
             if print_msg:
                 tqdm.write("Creating Backup " + backup_path)
 
+            self.__ensure_text_encoders_for_save()
             self.model_saver.save(
                 self.model,
                 self.config.model_type,
@@ -472,6 +539,7 @@ class GenericTrainer(BaseTrainer):
                 self.__prune_backups(self.config.rolling_backup_count)
 
         self.model_setup.setup_train_device(self.model, self.config)
+        self.__unload_text_encoders()
         # Special case for schedule-free optimizers.
         if self.config.optimizer.optimizer.is_schedule_free:
             torch.clear_autocast_cache()
@@ -500,6 +568,7 @@ class GenericTrainer(BaseTrainer):
             if self.config.optimizer.optimizer.is_schedule_free:
                 torch.clear_autocast_cache()
                 self.model.optimizer.eval()
+            self.__ensure_text_encoders_for_save()
             self.model_saver.save(
                 model=self.model,
                 model_type=self.config.model_type,
@@ -522,6 +591,7 @@ class GenericTrainer(BaseTrainer):
         finally:
             if self.model.ema:
                 self.model.ema.copy_temp_to(self.parameters)
+            self.__unload_text_encoders()
 
         torch_gc()
 
@@ -623,6 +693,11 @@ class GenericTrainer(BaseTrainer):
                 self.callbacks.on_update_status("Caching")
                 for _epoch in tqdm(range(train_progress.epoch, self.config.epochs, 1), desc="epoch"):
                     self.data_loader.get_data_set().start_next_epoch()
+                    if self.__should_unload_text_encoder() and self.config.validation \
+                            and not self.validation_cache_ready:
+                        self.validation_data_loader.get_data_set().start_next_epoch()
+                        self.validation_cache_ready = True
+                    self.__unload_text_encoders()
             return
 
         scaler = create_grad_scaler() if enable_grad_scaling(self.config.train_dtype, self.parameters) else None
@@ -649,6 +724,11 @@ class GenericTrainer(BaseTrainer):
             for _ in multi.master_first():
                 if self.config.latent_caching:
                     self.data_loader.get_data_set().start_next_epoch()
+                    if self.__should_unload_text_encoder() and self.config.validation \
+                            and multi.is_master() and not self.validation_cache_ready:
+                        self.validation_data_loader.get_data_set().start_next_epoch()
+                        self.validation_cache_ready = True
+                    self.__unload_text_encoders()
                     self.model_setup.setup_train_device(self.model, self.config)
                 else:
                     self.model_setup.setup_train_device(self.model, self.config)
@@ -870,6 +950,7 @@ class GenericTrainer(BaseTrainer):
                     save_path = self.config.output_model_destination
                 print("Saving " + save_path)
 
+                self.__ensure_text_encoders_for_save()
                 self.model_saver.save(
                     model=self.model,
                     model_type=self.config.model_type,

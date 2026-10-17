@@ -76,7 +76,8 @@ class Krea2LoRASetup(
             parts.append("vae")
         model.materialize_only(*parts)
 
-        model.text_encoder.eval()
+        if model.text_encoder is not None:
+            model.text_encoder.eval()
         model.vae.eval()
 
         if config.transformer.train:

@@ -25,6 +25,30 @@ class Krea2ModelLoader(
     def __init__(self):
         super().__init__()
 
+    def __load_text_encoders(
+            self,
+            model: Krea2Model,
+            weight_dtypes: ModelWeightDtypes,
+            base_model_name: str,
+    ):
+        model.text_encoder = self._load_transformers_sub_module(
+            Qwen3VLModel,
+            weight_dtypes.text_encoder,
+            weight_dtypes.fallback_train_dtype,
+            base_model_name,
+            "text_encoder",
+        )
+
+    def load_text_encoders(
+            self,
+            model: Krea2Model,
+            model_type: ModelType,
+            model_names: ModelNames,
+            weight_dtypes: ModelWeightDtypes,
+            quantization: QuantizationConfig,
+    ):
+        self.__load_text_encoders(model, weight_dtypes, model_names.base_model)
+
     def __load_internal(
             self,
             model: Krea2Model,
@@ -62,13 +86,7 @@ class Krea2ModelLoader(
             subfolder="scheduler",
         )
 
-        text_encoder = self._load_transformers_sub_module(
-            Qwen3VLModel,
-            weight_dtypes.text_encoder,
-            weight_dtypes.fallback_train_dtype,
-            base_model_name,
-            "text_encoder",
-        )
+        self.__load_text_encoders(model, weight_dtypes, base_model_name)
 
         if vae_model_name: #TODO simplify
             vae = self._load_diffusers_sub_module(
@@ -111,7 +129,6 @@ class Krea2ModelLoader(
         model.model_type = model_type
         model.tokenizer = tokenizer
         model.noise_scheduler = noise_scheduler
-        model.text_encoder = text_encoder
         model.vae = vae
         model.transformer = transformer
 

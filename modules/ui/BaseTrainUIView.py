@@ -228,6 +228,10 @@ class BaseTrainUIView(ABC):
                          tooltip="The device used to temporarily offload models while they are not used. Default:\"cpu\"")
         self.components.entry(frame, 15, 1, ui_state, "temp_device")
 
+        self.components.label(frame, 16, 0, "Unload text encoder after caching",
+                         tooltip="Fully unloads the text encoder from memory after latent caching is complete")
+        self.components.switch(frame, 16, 1, ui_state, "unload_text_encoder_after_caching")
+
     def build_data_tab_content(self, frame, controller, ui_state):
         # aspect ratio bucketing
         self.components.label(frame, 0, 0, "Aspect Ratio Bucketing",

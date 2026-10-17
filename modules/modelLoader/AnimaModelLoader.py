@@ -29,6 +29,37 @@ class AnimaModelLoader(
     def __init__(self):
         super().__init__()
 
+    def __load_text_encoders(
+            self,
+            model: AnimaModel,
+            weight_dtypes: ModelWeightDtypes,
+            base_model_name: str,
+    ):
+        model.text_encoder = self._load_transformers_sub_module(
+            Qwen3Model,
+            weight_dtypes.text_encoder,
+            weight_dtypes.fallback_train_dtype,
+            base_model_name,
+            "text_encoder",
+        )
+
+        # The conditioner is part of Anima's text-encoding path and must be reloaded with it.
+        model.text_conditioner = AnimaTextConditioner.from_pretrained(
+            base_model_name,
+            subfolder="text_conditioner",
+            torch_dtype=torch.bfloat16,
+        )
+
+    def load_text_encoders(
+            self,
+            model: AnimaModel,
+            model_type: ModelType,
+            model_names: ModelNames,
+            weight_dtypes: ModelWeightDtypes,
+            quantization: QuantizationConfig,
+    ):
+        self.__load_text_encoders(model, weight_dtypes, model_names.base_model)
+
     def __load_internal(
             self,
             model: AnimaModel,
@@ -71,20 +102,7 @@ class AnimaModelLoader(
             subfolder="scheduler",
         )
 
-        text_encoder = self._load_transformers_sub_module(
-            Qwen3Model,
-            weight_dtypes.text_encoder,
-            weight_dtypes.fallback_train_dtype,
-            base_model_name,
-            "text_encoder",
-        )
-
-        # conditioner is always bfloat16 — small adapter, no user dtype control
-        text_conditioner = AnimaTextConditioner.from_pretrained(
-            base_model_name,
-            subfolder="text_conditioner",
-            torch_dtype=torch.bfloat16,
-        )
+        self.__load_text_encoders(model, weight_dtypes, base_model_name)
 
         if vae_model_name: #TODO simplify
             vae = self._load_diffusers_sub_module(
@@ -128,8 +146,6 @@ class AnimaModelLoader(
         model.tokenizer = tokenizer
         model.t5_tokenizer = t5_tokenizer
         model.noise_scheduler = noise_scheduler
-        model.text_encoder = text_encoder
-        model.text_conditioner = text_conditioner
         model.vae = vae
         model.transformer = transformer
 

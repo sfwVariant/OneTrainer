@@ -429,6 +429,7 @@ class TrainConfig(BaseConfig):
     dataloader_threads: int
     train_device: str
     temp_device: str
+    unload_text_encoder_after_caching: bool
     train_dtype: DataType
     fallback_train_dtype: DataType
     enable_autocast_cache: bool
@@ -1071,6 +1072,7 @@ class TrainConfig(BaseConfig):
         data.append(("dataloader_threads", 2, int, False))
         data.append(("train_device", default_device.type, str, False))
         data.append(("temp_device", "cpu", str, False))
+        data.append(("unload_text_encoder_after_caching", False, bool, False))
         data.append(("train_dtype", DataType.FLOAT_16, DataType, False))
         data.append(("fallback_train_dtype", DataType.BFLOAT_16, DataType, False))
         data.append(("enable_autocast_cache", True, bool, False))
