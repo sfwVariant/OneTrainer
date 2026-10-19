@@ -8,7 +8,6 @@ from modules.util.convert_util import add_prefix
 from modules.util.enum.DataType import DataType
 from modules.util.enum.ModelType import ModelType
 from modules.util.LayerOffloadConductor import LayerOffloadConductor
-from modules.util.torch_util import torch_gc
 
 import torch
 from torch import Tensor
@@ -148,9 +147,8 @@ class AnimaModel(BaseModel):
         return (*super().text_encoder_reference_names(), "text_conditioner")
 
     def unload_text_encoders(self):
-        super().unload_text_encoders()
         self.text_conditioner = None
-        torch_gc()
+        super().unload_text_encoders()
 
     def create_pipeline(self):
         pipe = AnimaAutoBlocks().init_pipeline()

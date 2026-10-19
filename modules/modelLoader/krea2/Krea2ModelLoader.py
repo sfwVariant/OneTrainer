@@ -31,6 +31,7 @@ class Krea2ModelLoader(
             weight_dtypes: ModelWeightDtypes,
             base_model_name: str,
     ):
+        print("Loading Krea 2 text encoder...")
         model.text_encoder = self._load_transformers_sub_module(
             Qwen3VLModel,
             weight_dtypes.text_encoder,
@@ -38,6 +39,7 @@ class Krea2ModelLoader(
             base_model_name,
             "text_encoder",
         )
+        print("Krea 2 text encoder loaded.")
 
     def load_text_encoders(
             self,

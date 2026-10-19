@@ -164,6 +164,7 @@ class BaseModel(metaclass=ABCMeta):
     def unload_text_encoders(self):
         """Remove text encoder modules and all model-owned references to them."""
         unloaded_parts = set()
+        unload_announced = False
         for part in self.model_type.text_encoder_parts():
             stem = f"{part}_1" if hasattr(self, f"{part}_1") else part
             component = getattr(self, stem, None)
@@ -174,6 +175,10 @@ class BaseModel(metaclass=ABCMeta):
                 setattr(self, conductor_name, None)
 
             if component is not None:
+                if not unload_announced:
+                    model_name = str(self.model_type).replace("_", " ").title()
+                    print(f"Unloading {model_name} text encoder...")
+                    unload_announced = True
                 setattr(self, stem, None)
                 unloaded_parts.add(part)
 
@@ -188,6 +193,8 @@ class BaseModel(metaclass=ABCMeta):
 
         self._unloaded_text_encoder_parts.update(unloaded_parts)
         torch_gc()
+        if unloaded_parts:
+            print(f"{model_name} text encoder unloaded.")
 
     def _move_part(self, part: str, device: torch.device):
         # The generic per-component move: `part` (or `part_1` for the first of several split text encoders),

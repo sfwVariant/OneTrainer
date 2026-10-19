@@ -35,6 +35,7 @@ class AnimaModelLoader(
             weight_dtypes: ModelWeightDtypes,
             base_model_name: str,
     ):
+        print("Loading Anima text encoder...")
         model.text_encoder = self._load_transformers_sub_module(
             Qwen3Model,
             weight_dtypes.text_encoder,
@@ -49,6 +50,7 @@ class AnimaModelLoader(
             subfolder="text_conditioner",
             torch_dtype=torch.bfloat16,
         )
+        print("Anima text encoder loaded.")
 
     def load_text_encoders(
             self,
