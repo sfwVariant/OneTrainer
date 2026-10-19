@@ -61,3 +61,13 @@ class BaseModelLoader(metaclass=ABCMeta):
             quantization: QuantizationConfig,
     ):
         raise NotImplementedError(f"Text encoder reloading is not supported by {type(self).__name__}")
+
+    def load_text_encoder_auxiliaries(
+            self,
+            model: BaseModel,
+            model_type: ModelType,
+            model_names: ModelNames,
+            weight_dtypes: ModelWeightDtypes,
+            quantization: QuantizationConfig,
+    ):
+        raise NotImplementedError(f"Text encoder auxiliary reloading is not supported by {type(self).__name__}")

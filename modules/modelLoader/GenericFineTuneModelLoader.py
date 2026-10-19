@@ -68,6 +68,18 @@ def make_fine_tune_model_loader(
                 model, model_type, model_names, weight_dtypes, quantization,
             )
 
+        def load_text_encoder_auxiliaries(
+                self,
+                model: model_class,
+                model_type: ModelType,
+                model_names: ModelNames,
+                weight_dtypes: ModelWeightDtypes,
+                quantization: QuantizationConfig,
+        ):
+            model_loader_class().load_text_encoder_auxiliaries(
+                model, model_type, model_names, weight_dtypes, quantization,
+            )
+
     for model_type in model_spec_map:
         for method in training_methods:
             factory.register(BaseModelLoader, GenericFineTuneModelLoader, model_type, method)

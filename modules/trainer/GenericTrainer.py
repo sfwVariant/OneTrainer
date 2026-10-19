@@ -240,10 +240,32 @@ class GenericTrainer(BaseTrainer):
                 data_loader.unload_text_encoder_references(self.model)
         self.model.unload_text_encoders()
 
-    def __ensure_text_encoders_for_save(self):
+    def __ensure_model_components_for_save(self, output_model_format: ModelFormat):
         # Transformer-only LoRA outputs and backups never serialize base text encoders.
-        if self.config.training_method != TrainingMethod.LORA:
-            self.model.ensure_text_encoders_loaded()
+        if self.config.training_method == TrainingMethod.LORA:
+            return
+
+        if output_model_format == ModelFormat.ORIGINAL_TRANSFORMER:
+            # Krea 2's native transformer file contains only transformer weights.
+            if self.config.model_type == ModelType.KREA_2:
+                return
+
+            # Anima's native transformer file also contains the small text conditioner, but not
+            # the large Qwen text encoder. Reload only that auxiliary component when necessary.
+            if self.config.model_type == ModelType.ANIMA:
+                if self.model.text_conditioner is None:
+                    self.model_loader.load_text_encoder_auxiliaries(
+                        self.model,
+                        self.config.model_type,
+                        self.model_names,
+                        self.model_weight_dtypes,
+                        self.config.quantization,
+                    )
+                    self.model.text_conditioner.requires_grad_(False)
+                    self.model.text_conditioner.eval()
+                return
+
+        self.model.ensure_text_encoders_loaded()
 
     def __prune_backups(self, backups_to_keep: int):
         backup_dirpath = os.path.join(self.config.workspace_dir, "backup")
@@ -499,7 +521,12 @@ class GenericTrainer(BaseTrainer):
         if os.path.isfile(self.config.sample_definition_file_name):
             shutil.copy2(self.config.sample_definition_file_name, samples_path)
 
-    def __backup(self, train_progress: TrainProgress, print_msg: bool = True):
+    def __backup(
+            self,
+            train_progress: TrainProgress,
+            print_msg: bool = True,
+            restore_training_state: bool = True,
+    ):
         torch_gc()
 
         self.callbacks.on_update_status("Creating backup")
@@ -516,7 +543,7 @@ class GenericTrainer(BaseTrainer):
             if print_msg:
                 tqdm.write("Creating Backup " + backup_path)
 
-            self.__ensure_text_encoders_for_save()
+            self.__ensure_model_components_for_save(ModelFormat.INTERNAL)
             self.model_saver.save(
                 self.model,
                 self.config.model_type,
@@ -539,12 +566,13 @@ class GenericTrainer(BaseTrainer):
             if self.config.rolling_backup:
                 self.__prune_backups(self.config.rolling_backup_count)
 
-        self.model_setup.setup_train_device(self.model, self.config)
-        self.__unload_text_encoders()
-        # Special case for schedule-free optimizers.
-        if self.config.optimizer.optimizer.is_schedule_free:
-            torch.clear_autocast_cache()
-            self.model.optimizer.train()
+        if restore_training_state:
+            self.model_setup.setup_train_device(self.model, self.config)
+            self.__unload_text_encoders()
+            # Special case for schedule-free optimizers.
+            if self.config.optimizer.optimizer.is_schedule_free:
+                torch.clear_autocast_cache()
+                self.model.optimizer.train()
 
         torch_gc()
 
@@ -569,7 +597,7 @@ class GenericTrainer(BaseTrainer):
             if self.config.optimizer.optimizer.is_schedule_free:
                 torch.clear_autocast_cache()
                 self.model.optimizer.eval()
-            self.__ensure_text_encoders_for_save()
+            self.__ensure_model_components_for_save(self.config.output_model_format)
             self.model_saver.save(
                 model=self.model,
                 model_type=self.config.model_type,
@@ -804,7 +832,7 @@ class GenericTrainer(BaseTrainer):
                     if multi.is_master() and (backup or save):
                         self.model.evict()
                         if backup:
-                            self.__backup(train_progress, True)
+                            self.__backup(train_progress, True, restore_training_state=not save)
                         if save:
                             self.__save(train_progress, True)
                         self.model_setup.setup_train_device(self.model, self.config)
@@ -930,7 +958,7 @@ class GenericTrainer(BaseTrainer):
             self.model.evict()
 
             if self.config.backup_before_save and multi.is_master():
-                self.__backup(self.model.train_progress)
+                self.__backup(self.model.train_progress, restore_training_state=False)
 
             # Special case for schedule-free optimizers.
             if self.config.optimizer.optimizer.is_schedule_free:
@@ -951,14 +979,17 @@ class GenericTrainer(BaseTrainer):
                     save_path = self.config.output_model_destination
                 print("Saving " + save_path)
 
-                self.__ensure_text_encoders_for_save()
-                self.model_saver.save(
-                    model=self.model,
-                    model_type=self.config.model_type,
-                    output_model_format=self.config.output_model_format,
-                    output_model_destination=save_path,
-                    dtype=self.config.output_dtype.torch_dtype()
-                )
+                self.__ensure_model_components_for_save(self.config.output_model_format)
+                try:
+                    self.model_saver.save(
+                        model=self.model,
+                        model_type=self.config.model_type,
+                        output_model_format=self.config.output_model_format,
+                        output_model_destination=save_path,
+                        dtype=self.config.output_dtype.torch_dtype()
+                    )
+                finally:
+                    self.__unload_text_encoders()
 
         if self.model is not None:
             self.model.evict()

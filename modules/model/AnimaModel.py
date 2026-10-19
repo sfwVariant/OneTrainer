@@ -147,8 +147,14 @@ class AnimaModel(BaseModel):
         return (*super().text_encoder_reference_names(), "text_conditioner")
 
     def unload_text_encoders(self):
+        conditioner_loaded = self.text_conditioner is not None
+        text_encoder_loaded = self.text_encoder is not None
+        if conditioner_loaded and not text_encoder_loaded:
+            print("Unloading Anima text conditioner...")
         self.text_conditioner = None
         super().unload_text_encoders()
+        if conditioner_loaded and not text_encoder_loaded:
+            print("Anima text conditioner unloaded.")
 
     def create_pipeline(self):
         pipe = AnimaAutoBlocks().init_pipeline()
