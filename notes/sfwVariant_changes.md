@@ -1,8 +1,15 @@
+# Changes from official repo
 
+- Added saving & loading quantized models so they don't get re-quantized every time
 - Added option checkbox in General tab to unload text encoder fully after caching
   - Massive RAM saver if you don't need the text encoder for anything after caching is done
-  - Implemented somewhat naively, so only check it to true if you know the encoder isn't needed for anything after caching
-- Saving & loading quantized modles so they don't get re-quantized every time
+  - Automatically disabled if: `Cache Only` is enabled, or `Latent Caching` is disabled, or training a text encoder lora
+  - Unloads after first cache, i.e. everything prior to epoch 1
+      - And unloads when `Clear cache before training` is disabled
+  - Does NOT intelligently check other settings like Concept text variations
+     - PROBLEM: OneTrainer makes extra variations on the fly, so it'll reload the text encoder every time it needs to make new variations
+     - SOLUTION: if you're doing multiple variations, do a `Cache Only` run first to pre-cache all variations and then turn off `Clear cache before training` for the real run
+
 
 Specs below (there are two).
 
